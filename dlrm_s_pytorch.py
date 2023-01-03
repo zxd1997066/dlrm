@@ -746,7 +746,7 @@ def dash_separated_floats(value):
 
     return value
 
-
+@torch.no_grad()
 def inference(
     args,
     dlrm,
@@ -759,11 +759,16 @@ def inference(
 ):
     test_accu = 0
     test_samp = 0
+    # NHWC
+    if args.channels_last:
+        dlrm = dlrm.to(memory_format=torch.channels_last)
+        print("---- Use NHWC model")
 
     if args.mlperf_logging:
         scores = []
         targets = []
-
+    total_time = 0.0
+    total_sample = 0
     for i, testBatch in enumerate(test_ld):
         # early exit if nbatches was set by the user and was exceeded
         if nbatches > 0 and i >= nbatches:
@@ -779,6 +784,7 @@ def inference(
             continue
 
         # forward pass
+        elapsed = time.time()
         Z_test = dlrm_wrap(
             X_test,
             lS_o_test,
@@ -787,6 +793,14 @@ def inference(
             device,
             ndevices=ndevices,
         )
+        if torch.cuda.is_available(): torch.cuda.synchronize()
+        elapsed = time.time() - elapsed
+        if args.profile:
+            args.p.step()
+        print("Iteration: {}, inference time: {} sec.".format(i, elapsed), flush=True)
+        if i >= args.num_warmup:
+            total_time += elapsed
+            total_sample += args.mini_batch_size
         ### gather the distributed results on each rank ###
         # For some reason it requires explicit sync before all_gather call if
         # tensor is on GPU memory
@@ -797,21 +811,26 @@ def inference(
             Z_test = ext_dist.all_gather(Z_test, batch_split_lengths)
 
         if args.mlperf_logging:
-            S_test = Z_test.detach().cpu().numpy()  # numpy array
-            T_test = T_test.detach().cpu().numpy()  # numpy array
+            S_test = Z_test.detach().float().cpu().numpy()  # numpy array
+            T_test = T_test.detach().float().cpu().numpy()  # numpy array
             scores.append(S_test)
             targets.append(T_test)
         else:
             with record_function("DLRM accuracy compute"):
                 # compute loss and accuracy
-                S_test = Z_test.detach().cpu().numpy()  # numpy array
-                T_test = T_test.detach().cpu().numpy()  # numpy array
+                S_test = Z_test.detach().float().cpu().numpy()  # numpy array
+                T_test = T_test.detach().float().cpu().numpy()  # numpy array
 
                 mbs_test = T_test.shape[0]  # = mini_batch_size except last
                 A_test = np.sum((np.round(S_test, 0) == T_test).astype(np.uint8))
 
                 test_accu += A_test
                 test_samp += mbs_test
+
+    throughput = total_sample / total_time
+    latency = total_time / total_sample * 1000
+    print('inference latency: %.3f ms' % latency)
+    print('inference Throughput: %f samples/s' % throughput)
 
     if args.mlperf_logging:
         with record_function("DLRM mlperf sklearn metrics compute"):
@@ -1007,6 +1026,18 @@ def run():
     parser.add_argument("--lr-num-warmup-steps", type=int, default=0)
     parser.add_argument("--lr-decay-start-step", type=int, default=0)
     parser.add_argument("--lr-num-decay-steps", type=int, default=0)
+
+    # for oob
+    # parser.add_argument('--device', type=str, default='cpu', help='device')
+    parser.add_argument('--precision', type=str, default='float32', help='precision')
+    parser.add_argument('--channels_last', type=int, default=1, help='use channels last format')
+    # parser.add_argument('--batch_size', type=int, default=1, help='batch_size')
+    parser.add_argument('--num_iter', type=int, default=-1, help='num_iter')
+    parser.add_argument('--num_warmup', type=int, default=-1, help='num_warmup')
+    parser.add_argument('--profile', dest='profile', action='store_true', help='profile')
+    parser.add_argument('--quantized_engine', type=str, default=None, help='quantized_engine')
+    parser.add_argument('--ipex', dest='ipex', action='store_true', help='ipex')
+    parser.add_argument('--jit', dest='jit', action='store_true', help='jit')
 
     global args
     global nbatches
@@ -1751,15 +1782,53 @@ def run():
                 )
         else:
             print("Testing for inference only")
-            inference(
-                args,
-                dlrm,
-                best_acc_test,
-                best_auc_test,
-                test_ld,
-                device,
-                use_gpu,
-            )
+            if args.profile:
+                def trace_handler(p):
+                    output = p.key_averages().table(sort_by="self_cpu_time_total")
+                    print(output)
+                    import os
+                    import pathlib
+                    timeline_dir = str(pathlib.Path.cwd()) + '/timeline/'
+                    if not os.path.exists(timeline_dir):
+                        try:
+                            os.makedirs(timeline_dir)
+                        except:
+                            pass
+                    timeline_file = timeline_dir + 'timeline-' + str(torch.backends.quantized.engine) + '-' + \
+                                'dlrm-' + str(p.step_num) + '-' + str(os.getpid()) + '.json'
+                    p.export_chrome_trace(timeline_file)
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+                    record_shapes=True,
+                    schedule=torch.profiler.schedule(
+                        wait=int(nbatches/2),
+                        warmup=2,
+                        active=1,
+                    ),
+                    on_trace_ready=trace_handler,
+                ) as p:
+                    args.p = p
+                    if args.precision == "bfloat16":
+                        print('---- Enable AMP bfloat16')
+                        with torch.cpu.amp.autocast(enabled=True, dtype=torch.bfloat16):
+                            inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                    elif args.precision == "float16":
+                        print('---- Enable AMP float16')
+                        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
+                            inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                    else:
+                        inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+            else:
+                if args.precision == "bfloat16":
+                    print('---- Enable AMP bfloat16')
+                    with torch.cpu.amp.autocast(enabled=True, dtype=torch.bfloat16):
+                        inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                elif args.precision == "float16":
+                    print('---- Enable AMP float16')
+                    with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
+                        inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                else:
+                    inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
 
     # profiling
     if args.enable_profiling:
