@@ -17,6 +17,9 @@ function main {
     batch_size_list=($(echo "${batch_size}" |sed 's/,/ /g'))
 
     # generate benchmark
+    if [ "$device" == "cuda" ];then
+        addtion_options+=" --use-gpu "
+    fi
     for model_name in ${model_name_list[@]}
     do
         # cache
