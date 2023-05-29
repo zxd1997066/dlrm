@@ -1814,7 +1814,7 @@ def run():
                             inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                     elif args.precision == "float16":
                         print('---- Enable AMP float16')
-                        with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
+                        with torch.cpu.amp.autocast(enabled=True, dtype=torch.half):
                             inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                     else:
                         inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
@@ -1825,7 +1825,7 @@ def run():
                         inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                 elif args.precision == "float16":
                     print('---- Enable AMP float16')
-                    with torch.cuda.amp.autocast(enabled=True, dtype=torch.float16):
+                    with torch.cpu.amp.autocast(enabled=True, dtype=torch.half):
                         inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                 else:
                     inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
