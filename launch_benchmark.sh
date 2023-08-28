@@ -10,7 +10,7 @@ function main {
     set_environment
 
     # requirements
-    pip install scikit-learn git+https://github.com/mlperf/logging.git
+    #pip install scikit-learn git+https://github.com/mlperf/logging.git
 
     # if multiple use 'xxx,xxx,xxx'
     model_name_list=($(echo "${model_name}" |sed 's/,/ /g'))
