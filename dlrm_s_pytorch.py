@@ -767,8 +767,12 @@ def inference(
     if args.mlperf_logging:
         scores = []
         targets = []
+    if args.compile:
+        dlrm = torch.compile(dlrm, backend=args.backend, options={"freezing": True})
     total_time = 0.0
     total_sample = 0
+    if args.compile:
+        model = torch.compile(model, backend=args.backend, options={"freezing": True})
     for i, testBatch in enumerate(test_ld):
         # early exit if nbatches was set by the user and was exceeded
         if nbatches > 0 and i >= nbatches:
@@ -1038,6 +1042,10 @@ def run():
     parser.add_argument('--quantized_engine', type=str, default=None, help='quantized_engine')
     parser.add_argument('--ipex', dest='ipex', action='store_true', help='ipex')
     parser.add_argument('--jit', dest='jit', action='store_true', help='jit')
+    parser.add_argument("--compile", action='store_true', default=False,
+                    help="enable torch.compile")
+    parser.add_argument("--backend", type=str, default='inductor',
+                    help="enable torch.compile backend")
 
     global args
     global nbatches
