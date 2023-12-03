@@ -771,8 +771,6 @@ def inference(
         dlrm = torch.compile(dlrm, backend=args.backend, options={"freezing": True})
     total_time = 0.0
     total_sample = 0
-    if args.compile:
-        model = torch.compile(model, backend=args.backend, options={"freezing": True})
     for i, testBatch in enumerate(test_ld):
         # early exit if nbatches was set by the user and was exceeded
         if nbatches > 0 and i >= nbatches:
