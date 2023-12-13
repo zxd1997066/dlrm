@@ -1094,7 +1094,7 @@ def run():
         # if the parameter is not set, use the same parameter for training
         args.test_num_workers = args.num_workers
 
-    use_gpu = args.use_gpu and torch.cuda.is_available()
+    use_gpu = args.use_gpu or torch.cuda.is_available()
 
     if not args.debug_mode:
         ext_dist.init_distributed(local_rank=args.local_rank, use_gpu=use_gpu, backend=args.dist_backend)
@@ -1820,8 +1820,12 @@ def run():
                             inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                     elif args.precision == "float16":
                         print('---- Enable AMP float16')
-                        with torch.cpu.amp.autocast(enabled=True, dtype=torch.half):
-                            inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                        if not torch.cuda.is_available():
+                            with torch.cpu.amp.autocast(enabled=True, dtype=torch.half):
+                                inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                        elif torch.cuda.is_available():
+                            with torch.cuda.amp.autocast(enabled=True, dtype=torch.half):
+                                inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                     else:
                         inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
             else:
@@ -1831,8 +1835,12 @@ def run():
                         inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                 elif args.precision == "float16":
                     print('---- Enable AMP float16')
-                    with torch.cpu.amp.autocast(enabled=True, dtype=torch.half):
-                        inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                    if not torch.cuda.is_available():
+                        with torch.cpu.amp.autocast(enabled=True, dtype=torch.half):
+                            inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
+                    elif torch.cuda.is_available():
+                        with torch.cuda.amp.autocast(enabled=True, dtype=torch.half):
+                            inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
                 else:
                     inference(args, dlrm, best_acc_test, best_auc_test, test_ld, device, use_gpu)
 
