@@ -1044,6 +1044,8 @@ def run():
                     help="enable torch.compile")
     parser.add_argument("--backend", type=str, default='inductor',
                     help="enable torch.compile backend")
+    parser.add_argument("--triton_cpu", action='store_true', default=False,
+                    help="enable triton_cpu")
 
     global args
     global nbatches
@@ -1055,7 +1057,10 @@ def run():
         assert float(sys.version[:3]) > 3.7, "The dataset_multiprocessing " + \
         "flag is susceptible to a bug in Python 3.7 and under. " + \
         "https://github.com/facebookresearch/dlrm/issues/172"
-
+    if args.triton_cpu:
+        print("run with triton cpu backend")
+        import torch._inductor.config
+        torch._inductor.config.cpu_backend="triton"
     if args.mlperf_logging:
         mlperf_logger.log_event(key=mlperf_logger.constants.CACHE_CLEAR, value=True)
         mlperf_logger.log_start(
