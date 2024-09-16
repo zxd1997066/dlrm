@@ -1087,6 +1087,7 @@ def run():
             )
 
     ### some basic setup ###
+    import torch
     np.random.seed(args.numpy_rand_seed)
     np.set_printoptions(precision=args.print_precision)
     torch.set_printoptions(precision=args.print_precision)
